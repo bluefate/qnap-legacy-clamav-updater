@@ -1,5 +1,7 @@
 # qnap-legacy-clamav-updater
 
+![qnap-legacy-clamav-updater banner](docs/images/qnap-legacy-clamav-updater-banner.png)
+
 **Tested: QNAP TS-469L | QTS 4.3.4 | Entware | ClamAV 1.4.3**
 
 Keep ClamAV virus definitions updated on legacy QNAP NAS devices using Entware ClamAV and automatic database synchronization.
