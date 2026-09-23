@@ -1,0 +1,35 @@
+## Example freshclam configuration for Entware ClamAV on legacy QNAP NAS.
+##
+## Copy this file to the location used by Entware ClamAV (commonly
+## /opt/etc/clamav/freshclam.conf or /opt/etc/freshclam.conf) only after
+## backing up any existing configuration.
+##
+## Do not overwrite an existing freshclam.conf without creating a backup first.
+##
+## Tested with:
+##   QNAP TS-469L | QTS 4.3.4 | Entware | ClamAV 1.4.3
+
+## Where Entware ClamAV stores virus definition databases.
+DatabaseDirectory /opt/var/lib/clamav
+
+## Owner of the database files after update.
+## On the tested TS-469L Entware install, DatabaseOwner admin was required.
+## An earlier incorrect setting produced errors involving the "nobody" user.
+## Adjust only if your Entware ClamAV package intentionally uses a different user.
+DatabaseOwner admin
+
+## Optional: reduce mirror load / noise. Uncomment and tune as needed.
+# Checks 12
+# MaxAttempts 3
+# ConnectTimeout 30
+# ReceiveTimeout 60
+
+## Optional: log file. Ensure the directory exists and is writable.
+# UpdateLogFile /opt/var/log/freshclam.log
+# LogTime yes
+# LogVerbose no
+
+## Optional: notify ClamAV daemon after update (only if clamd is running
+## from Entware and you intentionally use it). Leave commented for the
+## QNAP Antivirus sync workflow.
+# NotifyClamd /opt/etc/clamav/clamd.conf

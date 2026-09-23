@@ -1,0 +1,29 @@
+# Editor and OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.code-workspace
+
+# Backup and temporary files created on the NAS
+*.bak
+*.bak.*
+*.tmp
+*.staging
+*.old
+
+# Local freshclam configuration (keep the example)
+config/freshclam.conf
+!config/freshclam.conf.example
+
+# Logs
+*.log
+logs/
+
+# Local test artifacts
+/tmp/
+.env
+.env.*
