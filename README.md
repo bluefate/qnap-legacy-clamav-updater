@@ -102,6 +102,8 @@ sh scripts/verify.sh
 
 It reports model/QTS (when detectable), Entware/ClamAV status, database locations, CVD sizes/timestamps/ownership, and cron state. It does **not** modify the system or send data anywhere.
 
+Also disable QNAP Antivirus **automatic** definition checks in Control Panel → Antivirus → Update (uncheck "Check and update automatically"). Details and screenshot: [docs/installation.md](docs/installation.md#disable-qnaps-built-in-automatic-definition-check).
+
 ## Cron configuration
 
 Recommended schedule (daily at 03:15):

@@ -203,7 +203,22 @@ sh scripts/verify.sh
 
 Or, if installed from the repo on another path, run the copy you checked out. The script is read-only and does not transmit data.
 
-Also open QNAP Antivirus and confirm it can run scans. The GUI may still show that QNAP’s *own* definition updater failed; that does not necessarily mean the synchronized CVD files are unusable. See [troubleshooting.md](troubleshooting.md).
+Also open QNAP Antivirus and confirm it can run scans.
+
+### Disable QNAP's built-in automatic definition check
+
+Because this workaround keeps definitions current via Entware + sync, turn off QNAP Antivirus's own automatic updater so it does not keep failing in the background or fighting the synced files.
+
+1. Open **Control Panel** (or App Center) → **Antivirus**.
+2. Open the **Update** settings.
+3. **Uncheck** "Check and update automatically. Frequency in days:".
+4. Click **Apply** / save if prompted.
+
+![QNAP Antivirus Update settings with automatic check disabled](images/qnap-antivirus-disable-auto-update.png)
+
+You do **not** need to use **Update now** or the manual `*.cvd` import for this workaround. Nightly `/opt/bin/qnap-av-db-sync.sh` (or a manual run) maintains the databases.
+
+The GUI may still show that QNAP’s *own* online updater failed if you click **Update now**; that does not mean the synchronized files are bad. See [troubleshooting.md](troubleshooting.md).
 
 ---
 

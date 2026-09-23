@@ -197,6 +197,8 @@ grep -F qnap-av-db-sync.sh /etc/config/crontab
 
 **Explanation:** The GUI message often reflects **QNAP’s own updater**, not whether the workaround maintained the database files. This project bypasses QNAP’s updater by synchronizing definitions from Entware `freshclam`. The GUI can continue to report updater failure even when the CVD files used for scanning are successfully refreshed.
 
+**Recommended:** In Antivirus → **Update**, uncheck **Check and update automatically** so QNAP stops retrying its broken updater daily. See [installation.md](installation.md#disable-qnaps-built-in-automatic-definition-check).
+
 **What to trust instead:**
 
 - Timestamps/sizes from `scripts/verify.sh`
