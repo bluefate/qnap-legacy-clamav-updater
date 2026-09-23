@@ -6,6 +6,42 @@ Reference host: QNAP TS-469L | QTS 4.3.4.2814 | Entware ClamAV 1.4.3
 
 ---
 
+## Stale .cld still used after syncing newer .cvd
+
+**Symptoms:** Sync reports success for `main.cvd` / `bytecode.cvd`, but definitions still look old.
+
+**Cause:** ClamAV prefers `.cld` when both `.cld` and `.cvd` exist. An ancient `main.cld` can override a fresh `main.cvd`.
+
+**Fix:** Use a sync script with `DISABLE_COMPETING=yes` (default in this project). It moves the unused competitor to `*.bak.qnap-av-db-sync` after installing the Entware file. Confirm with:
+
+```sh
+ls -l /share/CACHEDEV*_DATA/.antivirus/usr/share/clamav/main.* \
+      /share/CACHEDEV*_DATA/.antivirus/usr/share/clamav/daily.* \
+      /share/CACHEDEV*_DATA/.antivirus/usr/share/clamav/bytecode.*
+```
+
+---
+
+## No space left on device while staging
+
+**Symptoms:** Sync fails copying into `/tmp/...` with `No space left on device`.
+
+**Cause:** On many QNAP systems `/tmp` is a small ramdisk and cannot hold `main.cvd`.
+
+**Fix:** Current scripts stage under `/share/CACHEDEV*_DATA/tmp` when the Antivirus path is on that volume. Override with `STAGE_BASE=/path/with/space` if needed.
+
+---
+
+## Sync aborts looking for daily.cvd / missing CVD after successful freshclam
+
+**Symptoms:** `freshclam` reports databases up to date, but the sync script logs `Missing or empty .../daily.cvd` and does not copy files. Entware may show `daily.cld` instead of `daily.cvd`.
+
+**Cause:** Older sync scripts only copied `main.cvd`, `daily.cvd`, and `bytecode.cvd`. Current ClamAV often maintains `daily.cld` after incremental updates.
+
+**Fix:** Use a sync script that resolves each of `main` / `daily` / `bytecode` to `.cld` (preferred) or `.cvd`. Re-run the sync after updating the script.
+
+---
+
 ## freshclam command not found
 
 **Symptoms:** `freshclam: not found` or sync script exits because `/opt/sbin/freshclam` is missing.

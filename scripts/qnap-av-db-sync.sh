@@ -13,6 +13,11 @@
 # validate paths on your NAS before relying on this script. Do not assume
 # CACHEDEV1_DATA or ownership is universal across all QNAP models.
 #
+# ClamAV may publish databases as .cvd and/or .cld. After updates, daily
+# definitions are often daily.cld rather than daily.cvd. This script syncs
+# whichever form freshclam left in the Entware directory (.cld preferred
+# when both exist for the same base name).
+#
 
 set -eu
 
@@ -26,8 +31,15 @@ ENTWARE_DB_DIR="${ENTWARE_DB_DIR:-/opt/var/lib/clamav}"
 QNAP_AV_DB_DIR="${QNAP_AV_DB_DIR:-}"
 INSTALL_BIN="${INSTALL_BIN:-/opt/bin/qnap-av-db-sync.sh}"
 LOG_TAG="${LOG_TAG:-qnap-av-db-sync}"
-CVD_FILES="${CVD_FILES:-main.cvd daily.cvd bytecode.cvd}"
+# Base database names (extensions resolved dynamically: .cld preferred, else .cvd).
+DB_NAMES="${DB_NAMES:-main daily bytecode}"
 BACKUP_SUFFIX="${BACKUP_SUFFIX:-.bak.qnap-av-db-sync}"
+# When both .cld and .cvd exist for a synced name, move the unused one aside
+# (backed up) so ClamAV does not keep loading a stale competitor.
+DISABLE_COMPETING="${DISABLE_COMPETING:-yes}"
+# Staging directory base. QNAP /tmp is often a tiny ramdisk — prefer the
+# data volume. Override with STAGE_BASE or TMPDIR if needed.
+STAGE_BASE="${STAGE_BASE:-}"
 
 # ---------------------------------------------------------------------------
 # Logging helpers
@@ -89,6 +101,25 @@ file_nonempty() {
 	[ -f "$1" ] && [ -s "$1" ]
 }
 
+# Prefer .cld over .cvd when both exist (ClamAV loads .cld preferentially).
+# Prints the chosen filename (basename only) on success.
+resolve_db_file() {
+	_dir="$1"
+	_name="$2"
+	_cld="${_dir}/${_name}.cld"
+	_cvd="${_dir}/${_name}.cvd"
+
+	if file_nonempty "$_cld"; then
+		printf '%s.cld\n' "$_name"
+		return 0
+	fi
+	if file_nonempty "$_cvd"; then
+		printf '%s.cvd\n' "$_name"
+		return 0
+	fi
+	return 1
+}
+
 # Return "user:group" ownership of a reference file, or empty if unavailable.
 detect_ownership() {
 	_ref="$1"
@@ -142,6 +173,71 @@ detect_mode() {
 	return 1
 }
 
+warn_competing_db() {
+	_dest_dir="$1"
+	_file="$2"
+	_base="${_file%.*}"
+	_ext="${_file##*.}"
+	_other=""
+	if [ "$_ext" = "cld" ]; then
+		_other="${_dest_dir}/${_base}.cvd"
+	elif [ "$_ext" = "cvd" ]; then
+		_other="${_dest_dir}/${_base}.cld"
+	else
+		return 0
+	fi
+	if [ ! -e "$_other" ]; then
+		return 0
+	fi
+
+	if [ "$DISABLE_COMPETING" != "yes" ]; then
+		warn "Competing database also present (not modified): $_other"
+		warn "ClamAV typically prefers .cld over .cvd when both exist. Set DISABLE_COMPETING=yes to move it aside."
+		return 0
+	fi
+
+	_other_backup="${_other}${BACKUP_SUFFIX}"
+	info "Moving competing database aside: $_other -> $_other_backup"
+	if [ -e "$_other_backup" ]; then
+		rm -f "$_other_backup" || warn "Could not remove previous backup $_other_backup"
+	fi
+	if mv -f "$_other" "$_other_backup"; then
+		info "Competing database disabled (backed up): $_other_backup"
+	else
+		warn "Failed to move competing database aside: $_other"
+	fi
+}
+
+# Choose a staging base with enough space for large CVD/CLD files.
+# Prefer: STAGE_BASE, then <volume>/tmp next to QNAP AV DB, then TMPDIR, then /tmp.
+choose_stage_base() {
+	if [ -n "$STAGE_BASE" ]; then
+		printf '%s\n' "$STAGE_BASE"
+		return 0
+	fi
+
+	# Derive /share/CACHEDEVn_DATA from the antivirus DB path when possible.
+	case "$QNAP_AV_DB_DIR" in
+		/share/*_DATA/*|/share/*_DATA)
+			_vol="$(printf '%s\n' "$QNAP_AV_DB_DIR" | sed -n 's|^\(/share/[^/]*_DATA\)/.*|\1|p')"
+			if [ -z "$_vol" ]; then
+				_vol="$(printf '%s\n' "$QNAP_AV_DB_DIR" | sed -n 's|^\(/share/[^/]*_DATA\)$|\1|p')"
+			fi
+			if [ -n "$_vol" ] && [ -d "$_vol" ]; then
+				printf '%s/tmp\n' "$_vol"
+				return 0
+			fi
+			;;
+	esac
+
+	if [ -n "${TMPDIR:-}" ] && [ -d "${TMPDIR}" ]; then
+		printf '%s\n' "$TMPDIR"
+		return 0
+	fi
+
+	printf '%s\n' "/tmp"
+}
+
 # ---------------------------------------------------------------------------
 # Preflight checks
 # ---------------------------------------------------------------------------
@@ -171,27 +267,32 @@ info "freshclam:        $FRESHCLAM_BIN"
 info "Entware DB dir:   $ENTWARE_DB_DIR"
 info "QNAP AV DB dir:   $QNAP_AV_DB_DIR"
 
-# Determine ownership/mode from an existing QNAP CVD file when present.
+# Determine ownership/mode from an existing QNAP database file when present.
 # Do not assume clamav:clamav on every system.
 OWNERSHIP=""
 MODE=""
-for _cvd in $CVD_FILES; do
-	_existing="${QNAP_AV_DB_DIR}/${_cvd}"
-	if [ -e "$_existing" ]; then
-		OWNERSHIP="$(detect_ownership "$_existing" || true)"
-		MODE="$(detect_mode "$_existing" || true)"
-		if [ -n "$OWNERSHIP" ]; then
-			info "Preserving ownership from ${_cvd}: $OWNERSHIP"
+for _name in $DB_NAMES; do
+	for _ext in cld cvd; do
+		_existing="${QNAP_AV_DB_DIR}/${_name}.${_ext}"
+		if [ -e "$_existing" ]; then
+			OWNERSHIP="$(detect_ownership "$_existing" || true)"
+			MODE="$(detect_mode "$_existing" || true)"
+			if [ -n "$OWNERSHIP" ]; then
+				info "Preserving ownership from ${_name}.${_ext}: $OWNERSHIP"
+			fi
+			if [ -n "$MODE" ]; then
+				info "Preserving mode from ${_name}.${_ext}: $MODE"
+			fi
+			break
 		fi
-		if [ -n "$MODE" ]; then
-			info "Preserving mode from ${_cvd}: $MODE"
-		fi
+	done
+	if [ -n "$OWNERSHIP" ]; then
 		break
 	fi
 done
 
 if [ -z "$OWNERSHIP" ]; then
-	warn "Could not determine existing QNAP CVD ownership; copied files will keep the ownership produced by cp/chown defaults."
+	warn "Could not determine existing QNAP DB ownership; copied files will keep the ownership produced by cp/chown defaults."
 fi
 
 # ---------------------------------------------------------------------------
@@ -200,27 +301,34 @@ fi
 info "Running freshclam..."
 if ! "$FRESHCLAM_BIN"; then
 	# freshclam may return nonzero when databases are already up to date on
-	# some versions. Treat missing/empty CVD files after the run as fatal;
+	# some versions. Treat missing/empty DB files after the run as fatal;
 	# otherwise continue if databases are present.
 	warn "freshclam exited with a nonzero status; verifying databases before continuing"
 fi
 
+# Resolve which files to sync after freshclam (supports .cld and .cvd).
+SYNC_FILES=""
 MISSING=""
-for _cvd in $CVD_FILES; do
-	_src="${ENTWARE_DB_DIR}/${_cvd}"
-	if ! file_nonempty "$_src"; then
-		MISSING="${MISSING} ${_cvd}"
+for _name in $DB_NAMES; do
+	if _file="$(resolve_db_file "$ENTWARE_DB_DIR" "$_name")"; then
+		info "Entware ${_name}: ${_file}"
+		SYNC_FILES="${SYNC_FILES} ${_file}"
+	else
+		MISSING="${MISSING} ${_name}.cld|${_name}.cvd"
 	fi
 done
 
+# Trim leading space
+SYNC_FILES="$(printf '%s\n' "$SYNC_FILES" | sed 's/^ *//')"
+
 if [ -n "$MISSING" ]; then
-	die "Required Entware CVD files missing or empty after freshclam:${MISSING}"
+	die "Required Entware database files missing or empty after freshclam:${MISSING}"
 fi
 
-info "Entware CVD files verified"
+info "Entware database files verified: $SYNC_FILES"
 
 # ---------------------------------------------------------------------------
-# Stage, backup, and install CVD files safely
+# Stage, backup, and install database files safely
 # ---------------------------------------------------------------------------
 STAGE_DIR=""
 cleanup() {
@@ -232,49 +340,53 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM HUP
 
+_stage_base="$(choose_stage_base)"
+mkdir -p "$_stage_base" || die "Failed to create staging base directory: $_stage_base"
+info "Staging base: $_stage_base"
+
 STAGE_DIR=""
 if command -v mktemp >/dev/null 2>&1; then
-	STAGE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/qnap-av-db-sync.XXXXXX" 2>/dev/null || true)"
+	STAGE_DIR="$(mktemp -d "${_stage_base}/qnap-av-db-sync.XXXXXX" 2>/dev/null || true)"
 fi
 if [ -z "$STAGE_DIR" ] || [ ! -d "$STAGE_DIR" ]; then
-	STAGE_DIR="${TMPDIR:-/tmp}/qnap-av-db-sync.$$"
+	STAGE_DIR="${_stage_base}/qnap-av-db-sync.$$"
 	mkdir -p "$STAGE_DIR" || die "Failed to create staging directory"
 fi
 
-for _cvd in $CVD_FILES; do
-	_src="${ENTWARE_DB_DIR}/${_cvd}"
-	_staged="${STAGE_DIR}/${_cvd}"
+for _file in $SYNC_FILES; do
+	_src="${ENTWARE_DB_DIR}/${_file}"
+	_staged="${STAGE_DIR}/${_file}"
 
 	if ! file_nonempty "$_src"; then
-		die "Source CVD missing or empty before copy: $_src"
+		die "Source database missing or empty before copy: $_src"
 	fi
 
 	# Copy to staging first so a failed transfer does not touch the live DB.
-	cp -f "$_src" "$_staged" || die "Failed to stage $_cvd"
+	cp -f "$_src" "$_staged" || die "Failed to stage $_file"
 	if ! file_nonempty "$_staged"; then
-		die "Staged CVD is empty: $_staged"
+		die "Staged database is empty: $_staged"
 	fi
 
 	# Compare sizes as a basic integrity check.
 	_src_size="$(wc -c < "$_src" | tr -d ' ')"
 	_stg_size="$(wc -c < "$_staged" | tr -d ' ')"
 	if [ "$_src_size" != "$_stg_size" ]; then
-		die "Staged size mismatch for ${_cvd}: source=${_src_size} staged=${_stg_size}"
+		die "Staged size mismatch for ${_file}: source=${_src_size} staged=${_stg_size}"
 	fi
 
 	if [ -n "$OWNERSHIP" ] && command -v chown >/dev/null 2>&1; then
-		chown "$OWNERSHIP" "$_staged" || warn "Could not apply ownership $OWNERSHIP to staged $_cvd"
+		chown "$OWNERSHIP" "$_staged" || warn "Could not apply ownership $OWNERSHIP to staged $_file"
 	fi
 	if [ -n "$MODE" ] && command -v chmod >/dev/null 2>&1; then
-		chmod "$MODE" "$_staged" || warn "Could not apply mode $MODE to staged $_cvd"
+		chmod "$MODE" "$_staged" || warn "Could not apply mode $MODE to staged $_file"
 	fi
 done
 
-info "Staged CVD files ready; installing into QNAP Antivirus directory"
+info "Staged database files ready; installing into QNAP Antivirus directory"
 
-for _cvd in $CVD_FILES; do
-	_staged="${STAGE_DIR}/${_cvd}"
-	_dest="${QNAP_AV_DB_DIR}/${_cvd}"
+for _file in $SYNC_FILES; do
+	_staged="${STAGE_DIR}/${_file}"
+	_dest="${QNAP_AV_DB_DIR}/${_file}"
 	_backup="${_dest}${BACKUP_SUFFIX}"
 
 	# Backup existing destination when present (overwrite prior script backup).
@@ -284,33 +396,35 @@ for _cvd in $CVD_FILES; do
 
 	# Atomic-ish replace: copy staged file to a temp name in the destination
 	# directory, then mv into place.
-	_tmp_dest="${QNAP_AV_DB_DIR}/.${_cvd}.new.$$"
-	cp -f "$_staged" "$_tmp_dest" || die "Failed to copy staged ${_cvd} into QNAP directory"
+	_tmp_dest="${QNAP_AV_DB_DIR}/.${_file}.new.$$"
+	cp -f "$_staged" "$_tmp_dest" || die "Failed to copy staged ${_file} into QNAP directory"
 	if ! file_nonempty "$_tmp_dest"; then
 		rm -f "$_tmp_dest"
-		die "Temporary destination CVD empty: $_tmp_dest"
+		die "Temporary destination database empty: $_tmp_dest"
 	fi
 
 	if [ -n "$OWNERSHIP" ] && command -v chown >/dev/null 2>&1; then
-		chown "$OWNERSHIP" "$_tmp_dest" || warn "Could not set ownership on temporary $_cvd"
+		chown "$OWNERSHIP" "$_tmp_dest" || warn "Could not set ownership on temporary $_file"
 	fi
 	if [ -n "$MODE" ] && command -v chmod >/dev/null 2>&1; then
-		chmod "$MODE" "$_tmp_dest" || warn "Could not set mode on temporary $_cvd"
+		chmod "$MODE" "$_tmp_dest" || warn "Could not set mode on temporary $_file"
 	fi
 
-	mv -f "$_tmp_dest" "$_dest" || die "Failed to install ${_cvd} into place"
+	mv -f "$_tmp_dest" "$_dest" || die "Failed to install ${_file} into place"
 
-	info "Installed ${_cvd} -> ${_dest}"
+	info "Installed ${_file} -> ${_dest}"
+	warn_competing_db "$QNAP_AV_DB_DIR" "$_file"
 done
 
 # Final verification of destination files.
-for _cvd in $CVD_FILES; do
-	_dest="${QNAP_AV_DB_DIR}/${_cvd}"
+for _file in $SYNC_FILES; do
+	_dest="${QNAP_AV_DB_DIR}/${_file}"
 	if ! file_nonempty "$_dest"; then
-		die "Destination CVD missing or empty after install: $_dest"
+		die "Destination database missing or empty after install: $_dest"
 	fi
 done
 
 info "Synchronization completed successfully"
+info "Synced files: $SYNC_FILES"
 info "QNAP Antivirus database: $QNAP_AV_DB_DIR"
 exit 0

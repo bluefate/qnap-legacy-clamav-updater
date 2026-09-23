@@ -84,15 +84,15 @@ Do **not** overwrite an existing `freshclam.conf` without a backup.
 /opt/sbin/freshclam
 ```
 
-Confirm CVD files:
+Confirm database files (extensions may be `.cvd` and/or `.cld`):
 
 ```sh
-ls -l /opt/var/lib/clamav/main.cvd \
-      /opt/var/lib/clamav/daily.cvd \
-      /opt/var/lib/clamav/bytecode.cvd
+ls -l /opt/var/lib/clamav/main.* \
+      /opt/var/lib/clamav/daily.* \
+      /opt/var/lib/clamav/bytecode.*
 ```
 
-All three should exist and be non-empty.
+Each of `main`, `daily`, and `bytecode` should have a non-empty `.cld` and/or `.cvd`. After updates, `daily.cld` is common.
 
 ---
 

@@ -16,7 +16,7 @@ ENTWARE_DB_DIR="${ENTWARE_DB_DIR:-/opt/var/lib/clamav}"
 INSTALL_BIN="${INSTALL_BIN:-/opt/bin/qnap-av-db-sync.sh}"
 QNAP_CRONTAB_FILE="${QNAP_CRONTAB_FILE:-/etc/config/crontab}"
 QNAP_AV_DB_DIR="${QNAP_AV_DB_DIR:-}"
-CVD_FILES="${CVD_FILES:-main.cvd daily.cvd bytecode.cvd}"
+DB_NAMES="${DB_NAMES:-main daily bytecode}"
 
 OK_COUNT=0
 WARN_COUNT=0
@@ -43,6 +43,25 @@ info() {
 
 section() {
 	printf '\n== %s ==\n' "$*"
+}
+
+file_nonempty() {
+	[ -f "$1" ] && [ -s "$1" ]
+}
+
+# Prefer .cld over .cvd when reporting the active Entware/QNAP database file.
+resolve_db_file() {
+	_dir="$1"
+	_name="$2"
+	if file_nonempty "${_dir}/${_name}.cld"; then
+		printf '%s.cld\n' "$_name"
+		return 0
+	fi
+	if file_nonempty "${_dir}/${_name}.cvd"; then
+		printf '%s.cvd\n' "$_name"
+		return 0
+	fi
+	return 1
 }
 
 detect_model() {
@@ -191,18 +210,43 @@ else
 	QNAP_AV_DB_DIR=""
 fi
 
-section "Entware CVD files"
-for _cvd in $CVD_FILES; do
-	file_info "${ENTWARE_DB_DIR}/${_cvd}" || true
+section "Entware database files"
+for _name in $DB_NAMES; do
+	if _file="$(resolve_db_file "$ENTWARE_DB_DIR" "$_name")"; then
+		file_info "${ENTWARE_DB_DIR}/${_file}" || true
+		# Note competing extension if present.
+		_other=""
+		case "$_file" in
+			*.cld) _other="${ENTWARE_DB_DIR}/${_name}.cvd" ;;
+			*.cvd) _other="${ENTWARE_DB_DIR}/${_name}.cld" ;;
+		esac
+		if [ -n "$_other" ] && [ -e "$_other" ]; then
+			info "  also present: $_other"
+		fi
+	else
+		err "Entware ${_name}: neither ${_name}.cld nor ${_name}.cvd found/non-empty"
+	fi
 done
 
-section "QNAP Antivirus CVD files"
+section "QNAP Antivirus database files"
 if [ -n "$QNAP_AV_DB_DIR" ]; then
-	for _cvd in $CVD_FILES; do
-		file_info "${QNAP_AV_DB_DIR}/${_cvd}" || true
+	for _name in $DB_NAMES; do
+		if _file="$(resolve_db_file "$QNAP_AV_DB_DIR" "$_name")"; then
+			file_info "${QNAP_AV_DB_DIR}/${_file}" || true
+			_other=""
+			case "$_file" in
+				*.cld) _other="${QNAP_AV_DB_DIR}/${_name}.cvd" ;;
+				*.cvd) _other="${QNAP_AV_DB_DIR}/${_name}.cld" ;;
+			esac
+			if [ -n "$_other" ] && [ -e "$_other" ]; then
+				warn "Competing file also present: $_other (ClamAV usually prefers .cld)"
+			fi
+		else
+			err "QNAP ${_name}: neither ${_name}.cld nor ${_name}.cvd found/non-empty"
+		fi
 	done
 else
-	err "Skipping QNAP CVD inspection (directory unknown)"
+	err "Skipping QNAP database inspection (directory unknown)"
 fi
 
 section "Sync script"

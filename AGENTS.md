@@ -55,7 +55,7 @@ The bundled QNAP ClamAV installation could no longer reliably retrieve current v
 |------|----------------|
 | Entware freshclam | `/opt/sbin/freshclam` |
 | Entware DB directory | `/opt/var/lib/clamav` |
-| Entware CVD files | `main.cvd`, `daily.cvd`, `bytecode.cvd` under the Entware DB directory |
+| Entware DB files | `main` / `daily` / `bytecode` as `.cld` and/or `.cvd` under the Entware DB directory (`.cld` preferred when both exist; observed `daily.cld` + `main.cvd` + `bytecode.cvd` on the reference host) |
 | QNAP Antivirus DB directory | `/share/CACHEDEV1_DATA/.antivirus/usr/share/clamav` |
 | Sync script install path | `/opt/bin/qnap-av-db-sync.sh` |
 | freshclam `DatabaseDirectory` | `/opt/var/lib/clamav` |
@@ -189,9 +189,11 @@ qnap-legacy-clamav-updater/
 - Verify freshclam and Entware DB dir.
 - Detect/validate QNAP Antivirus DB dir (do not hard-require `CACHEDEV1_DATA` without probing).
 - Run `/opt/sbin/freshclam` (or configured path).
-- Verify `main.cvd`, `daily.cvd`, `bytecode.cvd`.
-- Stage copies; backup existing destination CVD files when practical.
-- Preserve ownership/mode discovered from existing QNAP CVD files (reference observed `clamav:clamav`, but do not assume it).
+- Verify `main`, `daily`, and `bytecode` resolve to non-empty `.cld` or `.cvd` (prefer `.cld` when both exist).
+- Stage copies; backup existing destination DB files when practical.
+- Preserve ownership/mode discovered from existing QNAP DB files (reference observed `clamav:clamav`, but do not assume it).
+- Warn about competing `.cld`/`.cvd` pairs in the QNAP directory; by default move the unused competitor aside with a `.bak.qnap-av-db-sync` backup (`DISABLE_COMPETING=yes`). Do not delete unrelated antivirus files.
+- Stage large DB copies on the data volume (`…/CACHEDEV*_DATA/tmp`), not QNAP’s small `/tmp` ramdisk.
 - Log useful status; nonzero exit on failure.
 - Never delete unrelated files from the QNAP antivirus directory.
 
