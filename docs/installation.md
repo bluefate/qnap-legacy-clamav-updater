@@ -1,241 +1,124 @@
 # Installation
 
-You can use `scripts/install.sh` or follow this manual procedure. The manual steps are the source of truth: everything the installer does should be understandable here.
+Use `scripts/install.sh`, or follow the manual steps below.
 
-**Tested reference:** QNAP TS-469L | QTS 4.3.4.2814 | Entware | ClamAV 1.4.3
+**Tested:** QNAP TS-469L | QTS 4.3.4.2814 | Entware | ClamAV 1.4.3  
+Paths are from that system — **verify on your NAS** before using them.
 
-Paths below are defaults from that system. **Verify them on your NAS** before copying files.
-
----
-
-## 1. Prerequisites
-
-- SSH login with sufficient privileges (typically `admin`)
-- Entware installed (`/opt` present, `opkg` working)
-- QNAP Antivirus installed so its database directory exists
-- Free disk space for CVD downloads and backups
-
-Confirm Entware:
+## Quick path (installer)
 
 ```sh
-ls -ld /opt
-/opt/bin/opkg --version
+sh scripts/install.sh
 ```
+
+Requires Entware + `freshclam` already present. The installer confirms paths, backs up what it changes, installs `/opt/bin/qnap-av-db-sync.sh`, and can set cron.
 
 ---
 
-## 2. Install Entware ClamAV
+## 1. Entware (if needed)
 
-Exact package names can vary by Entware feed. Typical approach:
+Check:
+
+```sh
+ls -ld /opt && /opt/bin/opkg --version
+```
+
+If that fails, install Entware via App Center → **Install Manually** using the standard QPKG.  
+Guide: [Entware — Install on QNAP NAS](https://github.com/Entware/Entware/wiki/Install-on-QNAP-NAS)
+
+Remove Optware/Qnapware first. Then:
+
+```sh
+/opt/bin/opkg update
+```
+
+If `opkg` is not on `PATH`: `source /opt/etc/profile` (or call `/opt/bin/opkg` directly).
+
+---
+
+## 2. Entware ClamAV + freshclam
 
 ```sh
 /opt/bin/opkg update
 /opt/bin/opkg install clamav
-```
-
-Confirm `freshclam`:
-
-```sh
-ls -l /opt/sbin/freshclam
-/opt/sbin/freshclam --version
-```
-
-Create the Entware database directory if needed:
-
-```sh
 mkdir -p /opt/var/lib/clamav
 ```
 
----
-
-## 3. Configure freshclam
-
-Locate the Entware `freshclam.conf` (common locations):
-
-- `/opt/etc/clamav/freshclam.conf`
-- `/opt/etc/freshclam.conf`
-
-**Always back up before changing:**
-
-```sh
-cp -a /opt/etc/clamav/freshclam.conf /opt/etc/clamav/freshclam.conf.bak.$(date +%Y%m%d%H%M%S)
-```
-
-Ensure at least:
+Back up, then set in `freshclam.conf` (`/opt/etc/freshclam.conf` or `/opt/etc/clamav/freshclam.conf`):
 
 ```text
 DatabaseDirectory /opt/var/lib/clamav
 DatabaseOwner admin
 ```
 
-An example file is shipped as [`config/freshclam.conf.example`](../config/freshclam.conf.example).
-
-### Why `DatabaseOwner admin`?
-
-On the reference host, an incorrect owner setting led to errors involving the `nobody` user. Setting `DatabaseOwner admin` matched the working Entware configuration on that system. If your Entware package expects a different owner, adjust carefully and confirm `freshclam` can write the database directory.
-
-Do **not** overwrite an existing `freshclam.conf` without a backup.
-
----
-
-## 4. Download definitions with freshclam
+Example: [`config/freshclam.conf.example`](../config/freshclam.conf.example).  
+`DatabaseOwner admin` avoids `nobody`-user errors seen on the reference host.
 
 ```sh
 /opt/sbin/freshclam
+ls -l /opt/var/lib/clamav/main.* /opt/var/lib/clamav/daily.* /opt/var/lib/clamav/bytecode.*
 ```
 
-Confirm database files (extensions may be `.cvd` and/or `.cld`):
-
-```sh
-ls -l /opt/var/lib/clamav/main.* \
-      /opt/var/lib/clamav/daily.* \
-      /opt/var/lib/clamav/bytecode.*
-```
-
-Each of `main`, `daily`, and `bytecode` should have a non-empty `.cld` and/or `.cvd`. After updates, `daily.cld` is common.
+Expect `.cvd` and/or `.cld` (often `daily.cld` after updates).
 
 ---
 
-## 5. Locate the QNAP Antivirus database directory
+## 3. QNAP Antivirus DB path
 
-On the tested TS-469L:
+Reference path:
 
 ```text
 /share/CACHEDEV1_DATA/.antivirus/usr/share/clamav
 ```
 
-On other systems, probe without assuming `CACHEDEV1`:
+Find yours:
 
 ```sh
 ls -ld /share/CACHEDEV*_DATA/.antivirus/usr/share/clamav
-ls -ld /share/*/.antivirus/usr/share/clamav
+ls -l /share/CACHEDEV*_DATA/.antivirus/usr/share/clamav/
 ```
 
-Inspect existing ownership (do not assume `clamav:clamav` everywhere):
-
-```sh
-ls -l /share/CACHEDEV1_DATA/.antivirus/usr/share/clamav/*.cvd
-```
-
-On the reference host, QNAP CVD files were owned by `clamav:clamav`.
+Ownership on the reference host was `clamav:clamav` — do not assume that everywhere.
 
 ---
 
-## 6. Install the synchronization script
-
-From this repository checkout:
+## 4. Sync script
 
 ```sh
 cp scripts/qnap-av-db-sync.sh /opt/bin/qnap-av-db-sync.sh
 chmod 755 /opt/bin/qnap-av-db-sync.sh
-```
-
-Optional environment overrides if your paths differ:
-
-```sh
-export FRESHCLAM_BIN=/opt/sbin/freshclam
-export ENTWARE_DB_DIR=/opt/var/lib/clamav
-export QNAP_AV_DB_DIR=/share/CACHEDEV1_DATA/.antivirus/usr/share/clamav
-```
-
-Run once manually:
-
-```sh
 /opt/bin/qnap-av-db-sync.sh
 ```
 
-Confirm QNAP-side CVD files updated:
-
-```sh
-ls -l /share/CACHEDEV1_DATA/.antivirus/usr/share/clamav/*.cvd
-```
-
-The script stages copies, backs up previous CVD files with a `.bak.qnap-av-db-sync` suffix when replacing, preserves detected ownership/mode, and does not delete unrelated files in the QNAP antivirus directory.
+Optional overrides: `FRESHCLAM_BIN`, `ENTWARE_DB_DIR`, `QNAP_AV_DB_DIR`.
 
 ---
 
-## 7. Persistent cron on QNAP
+## 5. Cron (survives reboot)
 
-Recommended schedule:
-
-```cron
-15 3 * * * /opt/bin/qnap-av-db-sync.sh >/dev/null 2>&1
-```
-
-### Important: survive reboot
-
-QNAP may regenerate the active crontab after reboot. Official guidance is:
-
-1. Edit **`/etc/config/crontab`** directly (do **not** rely on `crontab -e`).
-2. Load and restart cron:
-
-```sh
-crontab /etc/config/crontab && /etc/init.d/crond.sh restart
-```
-
-Example append (after verifying no duplicate exists):
+Do **not** use `crontab -e` alone. Edit `/etc/config/crontab`, then reload:
 
 ```sh
 cp -a /etc/config/crontab /etc/config/crontab.bak.$(date +%Y%m%d%H%M%S)
 grep -F 'qnap-av-db-sync.sh' /etc/config/crontab || \
   echo '15 3 * * * /opt/bin/qnap-av-db-sync.sh >/dev/null 2>&1' >> /etc/config/crontab
-crontab /etc/config/crontab && /etc/init.d/crond.sh restart
+/usr/bin/crontab /etc/config/crontab && /etc/init.d/crond.sh restart
 ```
 
-### Entware `crontab` conflict
-
-If Entware’s BusyBox `crontab` appears earlier on `PATH`, `crontab` may fail or manage a different spool. Prefer QNAP’s binary (often `/usr/bin/crontab`) or adjust `PATH` when loading `/etc/config/crontab`.
-
-Verify:
-
-```sh
-grep -F 'qnap-av-db-sync.sh' /etc/config/crontab
-/usr/bin/crontab -l 2>/dev/null || crontab -l
-```
+If Entware’s `crontab` shadows QNAP’s, prefer `/usr/bin/crontab`.
 
 ---
 
-## 8. Verification
+## 6. Verify
 
 ```sh
 sh scripts/verify.sh
 ```
 
-Or, if installed from the repo on another path, run the copy you checked out. The script is read-only and does not transmit data.
-
-Also open QNAP Antivirus and confirm it can run scans.
-
 ### Disable QNAP's built-in automatic definition check
 
-Because this workaround keeps definitions current via Entware + sync, turn off QNAP Antivirus's own automatic updater so it does not keep failing in the background or fighting the synced files.
-
-1. Open **Control Panel** (or App Center) → **Antivirus**.
-2. Open the **Update** settings.
-3. **Uncheck** "Check and update automatically. Frequency in days:".
-4. Click **Apply** / save if prompted.
+In **Antivirus → Update**, uncheck **Check and update automatically**, then save:
 
 ![QNAP Antivirus Update settings with automatic check disabled](images/qnap-antivirus-disable-auto-update.png)
 
-You do **not** need to use **Update now** or the manual `*.cvd` import for this workaround. Nightly `/opt/bin/qnap-av-db-sync.sh` (or a manual run) maintains the databases.
-
-The GUI may still show that QNAP’s *own* online updater failed if you click **Update now**; that does not mean the synchronized files are bad. See [troubleshooting.md](troubleshooting.md).
-
----
-
-## Automated installer
-
-```sh
-sh scripts/install.sh
-```
-
-The installer:
-
-1. Checks for QNAP markers and Entware/`freshclam`
-2. Detects the Antivirus DB directory
-3. Shows paths and asks for confirmation
-4. Backs up files it changes
-5. Installs `/opt/bin/qnap-av-db-sync.sh`
-6. Optionally writes `freshclam.conf` from the example (only after backup/confirmation)
-7. Optionally adds a non-duplicate persistent cron entry
-
-Review the scripts before running them on a production NAS.
+You do not need **Update now** or manual `*.cvd` import. If the GUI still complains about QNAP’s own updater, see [troubleshooting.md](troubleshooting.md).

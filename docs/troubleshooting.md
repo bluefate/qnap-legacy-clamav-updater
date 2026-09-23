@@ -49,11 +49,16 @@ ls -l /share/CACHEDEV*_DATA/.antivirus/usr/share/clamav/main.* \
 **Checks:**
 
 ```sh
+ls -ld /opt
 ls -l /opt/sbin/freshclam
 /opt/bin/opkg list-installed | grep -i clam
 ```
 
-**Fix:** Install Entware ClamAV (see [installation.md](installation.md)). If the binary lives elsewhere, set:
+**Fix:**
+
+- If `/opt` is missing, install Entware first: [installation.md — Entware](installation.md#1-entware-if-needed).
+- If Entware is present but ClamAV is not, install it (`/opt/bin/opkg update && /opt/bin/opkg install clamav`). See [installation.md](installation.md).
+- If the binary lives elsewhere, set:
 
 ```sh
 export FRESHCLAM_BIN=/path/to/freshclam

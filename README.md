@@ -63,7 +63,7 @@ More detail: [docs/how-it-works.md](docs/how-it-works.md).
 ## Requirements
 
 - SSH access to the NAS (typically as `admin`)
-- Entware installed and working
+- Entware installed and working ([install Entware if needed](docs/installation.md#1-entware-if-needed))
 - Entware ClamAV providing `/opt/sbin/freshclam`
 - QNAP Antivirus installed (so its database directory exists)
 - Enough free space for ClamAV CVD files and backups
@@ -88,11 +88,12 @@ Full step-by-step instructions (recommended reading even if you use the installe
 
 Key points:
 
-1. Install Entware ClamAV.
+1. Install Entware if needed, then Entware ClamAV.
 2. Configure `freshclam` with `DatabaseDirectory /opt/var/lib/clamav` and `DatabaseOwner admin`.
 3. Run `freshclam`.
 4. Install and run `scripts/qnap-av-db-sync.sh`.
 5. Schedule it with QNAP’s **persistent** cron method.
+6. Disable QNAP Antivirus automatic definition checks in the Control Panel.
 
 ## Verification
 
